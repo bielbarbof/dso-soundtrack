@@ -155,6 +155,11 @@ function applyEnginePatch(patch) {
       const seek=card.querySelector(".track-seek");
       if (seek) seek.max=Math.max(track.duration,currentPosition(track),1);
     }
+  } else if (patch.kind === "playback") {
+    track.position=Math.max(0,Number(patch.position)||0);
+    track.status=patch.status === "playing" ? "playing" : "paused";
+    track.startedAt=track.status === "playing" ? Date.now() : null;
+    renderNow();
   }
 }
 
@@ -261,7 +266,6 @@ els.stopAll.addEventListener("click",()=>sendControl({type:"stop-all"}));
 $("#menuButton").addEventListener("click",()=>els.menu.classList.toggle("hidden"));
 document.addEventListener("click",e=>{if(!els.menu.contains(e.target)&&!$("#menuButton").contains(e.target))els.menu.classList.add("hidden");});
 $("#addTrackButton").addEventListener("click",()=>{els.menu.classList.add("hidden");openTrackDialog();});
-$("#addTrackQuick").addEventListener("click",()=>openTrackDialog());
 $("#closeDialog").addEventListener("click",closeTrackDialog); $("#cancelDialog").addEventListener("click",closeTrackDialog);
 els.form.addEventListener("submit",e=>{e.preventDefault();const id=$("#trackId").value||makeId();const track={id,title:$("#trackTitle").value.trim(),url:normalizeDropboxUrl($("#trackUrl").value),tags:$("#trackTags").value.split(",").map(x=>x.trim()).filter(Boolean),volume:clamp(Number($("#trackVolume").value)/100,0,1),loop:$("#trackLoop").checked};if(!track.title||!track.url)return;const idx=state.library.findIndex(t=>t.id===id);if(idx>=0)state.library[idx]=track;else state.library.push(track);saveLibrary();renderLibrary();const active=playingTrack(id);if(active)sendControl({type:"update-track",track});closeTrackDialog();showToast(idx>=0?"Faixa atualizada.":"Faixa adicionada à biblioteca.");});
 els.search.addEventListener("input",()=>{state.filter=els.search.value;renderLibrary();});

@@ -168,3 +168,54 @@ h2 { margin:3px 0 0; font-size:15px; line-height:1; letter-spacing:.035em; }
 .tag-filter { height:30px; padding:0 11px; font-size:10px; font-weight:650; }
 .library-tags { gap:5px; margin-top:7px; }
 .library-tags span { padding:3px 8px; font-size:9px; line-height:1.15; }
+
+/* v0.1.3 — UI/UX polish */
+.app-header { padding:0 16px; }
+.brand { gap:12px; }
+.brand-icon { width:36px; height:36px; }
+.brand-icon svg { width:22px; height:22px; stroke:#e6e8ec; stroke-width:1.9; }
+.brand-icon .music-note { stroke:#e6e8ec; }
+.brand strong { font-size:15px; letter-spacing:.06em; }
+.brand small { margin-top:3px; font-size:10px; line-height:1.2; }
+.master-strip { padding:16px 16px 14px; }
+.master-title { align-items:center; margin-bottom:12px; }
+.master-title > div { align-items:center; gap:11px; min-height:29px; }
+.master-title span { line-height:1; }
+.master-title strong { line-height:1; font-size:17px; }
+.stop-all { display:flex; align-items:center; justify-content:center; line-height:1; }
+.master-meta { align-items:center; line-height:1; margin-top:10px; }
+.now-section { padding:14px 16px 16px; }
+.now-playing { gap:10px; }
+.mix-card { padding:13px; }
+.mix-head { align-items:center; min-height:32px; }
+.track-title { display:flex; flex-direction:column; justify-content:center; min-height:32px; }
+.track-title strong { font-size:13px; line-height:1.2; }
+.track-title small { margin-top:4px; font-size:9px; line-height:1.2; }
+.track-actions { align-items:center; }
+.track-actions button { width:32px; height:32px; }
+.timeline { grid-template-columns:40px minmax(0,1fr) 40px; gap:9px; margin-top:12px; }
+.timeline time { display:flex; align-items:center; min-height:14px; line-height:1; font-size:8px; }
+.timeline time:last-child { justify-content:flex-end; }
+.timeline .range { align-self:center; }
+.mix-controls { margin-top:11px; grid-template-columns:minmax(0,1fr) auto; gap:11px; }
+.volume-wrap { grid-template-columns:38px minmax(0,1fr) 37px; gap:8px; min-width:0; }
+.volume-wrap span, .volume-wrap output { display:flex; align-items:center; min-height:18px; line-height:1; }
+.volume-wrap output { justify-content:flex-end; }
+.loop-button { height:29px; padding:0 8px; min-width:58px; display:flex; align-items:center; justify-content:center; line-height:1; }
+.library-section { padding:12px 16px 18px; }
+.search-box { margin-bottom:11px; }
+.tag-filters { align-items:center; }
+.tag-filter { display:flex; align-items:center; justify-content:center; line-height:1; }
+.library-card { min-height:65px; padding:11px 12px; }
+.library-info { display:flex; flex-direction:column; justify-content:center; }
+.library-info strong { font-size:12px; line-height:1.2; }
+.library-tags span { display:inline-flex; align-items:center; min-height:20px; }
+.library-actions button { width:33px; min-width:33px; height:33px; }
+.floating-menu button { line-height:1; }
+
+/* Active track: dark wine surface, never a red outline. */
+.mix-card.is-playing {
+  border-color:#33292d;
+  background:linear-gradient(145deg,#1d1015 0%,#160e12 55%,#111117 100%);
+  box-shadow:0 8px 24px rgba(0,0,0,.2), inset 0 0 34px rgba(92,20,31,.07);
+}

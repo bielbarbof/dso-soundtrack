@@ -49,13 +49,21 @@ function getPosition(track) {
   return raw;
 }
 
+function livePosition(track) {
+  const audio = state.audio.get(track.id);
+  if (audio && Number.isFinite(audio.currentTime) && audio.readyState >= 1) {
+    return Math.max(0, audio.currentTime);
+  }
+  return getPosition(track);
+}
+
 function snapshot() {
   const sentAt = now();
   return {
     master: state.master,
     tracks: Object.values(state.tracks).map((track) => ({
       ...track,
-      position: getPosition(track),
+      position: livePosition(track),
       startedAt: null,
     })),
     sentAt,
@@ -329,7 +337,7 @@ async function hydrateRemoteSnapshot(incoming) {
   notifyLocal({ type: "state", state: snapshot(), role: state.role });
 }
 
-function applyRemotePatch(patch) {
+async function applyRemotePatch(patch) {
   if (!patch || typeof patch !== "object") return;
 
   if (patch.kind === "master") {
@@ -349,6 +357,13 @@ function applyRemotePatch(patch) {
     const track = state.tracks[patch.trackId];
     if (!track) return;
     track.duration = Math.max(0, Number(patch.duration) || 0);
+  } else if (patch.kind === "playback") {
+    const track = state.tracks[patch.trackId];
+    if (!track) return;
+    track.position = Math.max(0, Number(patch.position) || 0);
+    track.status = patch.status === "playing" ? "playing" : "paused";
+    track.startedAt = track.status === "playing" ? now() : null;
+    await applyTrackPlayback(track, { forcePosition: true });
   } else {
     return;
   }
@@ -429,20 +444,24 @@ async function handleControl(data) {
   } else if (data.type === "pause-track") {
     const track = state.tracks[data.trackId];
     if (!track) return;
-    track.position = getPosition(track);
+    const audio = state.audio.get(track.id);
+    track.position = audio && Number.isFinite(audio.currentTime) ? Math.max(0, audio.currentTime) : getPosition(track);
     track.status = "paused";
     track.startedAt = null;
-    const audio = state.audio.get(track.id);
     if (audio) {
       audio.pause();
       audio.playbackRate = 1;
     }
+    await broadcastPatch({ kind: "playback", trackId: track.id, status: "paused", position: track.position }, "ALL");
   } else if (data.type === "resume-track") {
     const track = state.tracks[data.trackId];
     if (!track) return;
+    const audio = ensureAudio(track);
+    if (Number.isFinite(audio.currentTime)) track.position = Math.max(0, audio.currentTime);
     track.status = "playing";
     track.startedAt = now();
     await applyTrackPlayback(track, { forcePosition: false });
+    await broadcastPatch({ kind: "playback", trackId: track.id, status: "playing", position: track.position }, "ALL");
   } else if (data.type === "stop-track") {
     const track = state.tracks[data.trackId];
     if (!track) return;
@@ -472,6 +491,7 @@ async function handleControl(data) {
     } catch {
       audio.__dsoPendingPosition = track.position;
     }
+    await broadcastPatch({ kind: "playback", trackId: track.id, status: track.status, position: track.position }, "ALL");
   } else if (data.type === "update-track") {
     const incoming = data.track;
     const track = state.tracks[incoming?.id];
@@ -526,7 +546,7 @@ async function init() {
       const data = event.data;
       if (!data || state.role === "GM") return;
       if (data.type === "snapshot") hydrateRemoteSnapshot(data.state);
-      if (data.type === "patch") applyRemotePatch(data.patch);
+      if (data.type === "patch") applyRemotePatch(data.patch).catch(() => {});
     });
 
     state.ready = true;
