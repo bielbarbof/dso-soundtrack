@@ -57,12 +57,19 @@ function formatTime(seconds) {
   return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
 }
 function currentPosition(track) {
-  if (track.status === "playing" && Number.isFinite(track.startedAt)) {
-    const elapsed = Math.max(0, (Date.now() - track.startedAt) / 1000);
-    if (track.loop && track.duration > 0) return elapsed % track.duration;
-    return Math.max(0, (track.position || 0) + elapsed);
-  }
-  return Math.max(0, Number(track.position) || 0);
+  const base = Math.max(0, Number(track.position) || 0);
+  if (track.status !== "playing" || !Number.isFinite(track.startedAt)) return base;
+
+  const elapsed = Math.max(0, (Date.now() - track.startedAt) / 1000);
+  const raw = base + elapsed;
+  const duration = Math.max(0, Number(track.duration) || 0);
+
+  // Em loop, a UI precisa continuar a partir da posição em que a faixa estava.
+  // Usar apenas `elapsed % duration` fazia o relógio visual voltar para 00:00
+  // toda vez que uma faixa pausada era retomada.
+  if (track.loop && duration > 0) return raw % duration;
+  if (duration > 0) return Math.min(raw, duration);
+  return raw;
 }
 function playingTrack(id) { return state.tracks.find(t => t.id === id); }
 function showToast(text, ms=2400) {
@@ -105,14 +112,16 @@ function setEngineState(payload) {
   if (!payload) return;
   if (Number.isFinite(payload.master)) state.master=clamp(payload.master,0,1);
   if (Array.isArray(payload.tracks)) {
-    const stamp=Date.now();
+    // `position` do snapshot representa a posição real no instante `sentAt`.
+    // Usar esse relógio como âncora mantém a UI acompanhando o áudio sem saltos.
+    const stamp=Number.isFinite(Number(payload.sentAt)) ? Number(payload.sentAt) : Date.now();
     state.tracks=payload.tracks.map(t=>({ ...t, startedAt:t.status==="playing"?stamp:null }));
   }
   state.engineReady=true;
   renderAll();
 }
 
-function applyEnginePatch(patch) {
+function applyEnginePatch(patch, sentAt = Date.now()) {
   if (!patch || typeof patch !== "object") return;
 
   if (patch.kind === "master") {
@@ -158,7 +167,9 @@ function applyEnginePatch(patch) {
   } else if (patch.kind === "playback") {
     track.position=Math.max(0,Number(patch.position)||0);
     track.status=patch.status === "playing" ? "playing" : "paused";
-    track.startedAt=track.status === "playing" ? Date.now() : null;
+    track.startedAt=track.status === "playing"
+      ? (Number.isFinite(Number(sentAt)) ? Number(sentAt) : Date.now())
+      : null;
     renderNow();
   }
 }
@@ -288,8 +299,8 @@ async function init(){
   if(!OBR.isAvailable){ state.role="GM";state.roomId="preview-room";state.playerId="preview";state.engineReady=true;loadLibrary();renderAll();els.loading.classList.add("hidden");return; }
   OBR.onReady(async()=>{
     state.roomId=OBR.room.id||"room"; state.playerId=OBR.player.id||"player"; state.role=await OBR.player.getRole(); loadLibrary();
-    OBR.broadcast.onMessage(ENGINE_CHANNEL,event=>{const d=event.data;if(d?.type==="state")setEngineState(d.state);if(d?.type==="patch")applyEnginePatch(d.patch);if(d?.type==="audio-blocked")showToast("O navegador bloqueou uma faixa. Interaja com o Owlbear e tente tocar novamente.",4200);if(d?.type==="audio-error")showToast(`Não foi possível carregar: ${d.title||"faixa"}. Verifique o link.`,4200);});
-    OBR.broadcast.onMessage(STATE_CHANNEL,event=>{const d=event.data;if(d?.type==="snapshot")setEngineState(d.state);if(d?.type==="patch")applyEnginePatch(d.patch);});
+    OBR.broadcast.onMessage(ENGINE_CHANNEL,event=>{const d=event.data;if(d?.type==="state")setEngineState(d.state);if(d?.type==="patch")applyEnginePatch(d.patch,d.sentAt);if(d?.type==="audio-blocked")showToast("O navegador bloqueou uma faixa. Interaja com o Owlbear e tente tocar novamente.",4200);if(d?.type==="audio-error")showToast(`Não foi possível carregar: ${d.title||"faixa"}. Verifique o link.`,4200);});
+    OBR.broadcast.onMessage(STATE_CHANNEL,event=>{const d=event.data;if(d?.type==="snapshot")setEngineState(d.state);if(d?.type==="patch")applyEnginePatch(d.patch,d.sentAt);});
     await OBR.broadcast.sendMessage(CONTROL_CHANNEL,{type:"ui-state-request"},{destination:"LOCAL"});
     if(state.role!=="GM")await OBR.broadcast.sendMessage(CONTROL_CHANNEL,{type:"request-state"},{destination:"REMOTE"});
     renderAll();els.loading.classList.add("hidden");

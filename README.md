@@ -1,4 +1,4 @@
-# DSO Soundtrack v0.1.3
+# DSO Soundtrack v0.1.4
 
 Extensão Tech Noir para Owlbear Rodeo voltada a trilhas, ambiências e camadas de áudio sincronizadas.
 

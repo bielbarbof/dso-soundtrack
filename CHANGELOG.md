@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.4
+
+### Correção crítica — relógio e barra de progresso
+- Corrigida a fórmula visual de posição em faixas com **LOOP ON**. Ao retomar uma faixa pausada, a UI agora continua exatamente do ponto em que parou em vez de voltar visualmente para `00:00`.
+- A posição exibida agora é calculada como `posição-base + tempo decorrido`, aplicando o módulo da duração somente depois da soma.
+- Snapshots usam `sentAt` como âncora temporal, reduzindo saltos e mantendo relógio/barra mais fiéis ao player real.
+- Patches de play/resume também preservam a âncora temporal recebida.
+- Faixas sem loop são limitadas visualmente à duração real em vez de ultrapassá-la.
+
 ## v0.1.3
 
 ### Interface
