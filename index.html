@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#090a0d" />
+  <title>DSO Soundtrack</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 64 64"><path d="M32 8 50 18v28L32 56 14 46V18Z"/><path d="M14 18 32 29 50 18M32 29v27M14 46l18-17 18 17M32 8v21"/><path class="pulse" d="M18 35h6l3-7 5 15 4-11 3 7h7"/></svg>
+        </div>
+        <div>
+          <strong>DSO SOUNDTRACK</strong>
+          <small id="roleLabel">Conectando ao mixer…</small>
+        </div>
+      </div>
+      <button id="menuButton" class="icon-button menu-button" type="button" aria-label="Abrir menu" title="Biblioteca e arquivos">
+        <svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+      </button>
+    </header>
+
+    <section class="master-strip">
+      <div class="master-title">
+        <div>
+          <span>MASTER OUTPUT</span>
+          <strong id="masterValue">70%</strong>
+        </div>
+        <button id="stopAllButton" class="stop-all" type="button">PARAR TUDO</button>
+      </div>
+      <input id="masterSlider" class="range range-master" type="range" min="0" max="100" value="70" aria-label="Volume global" />
+      <div class="master-meta">
+        <span id="activeCount">00 FAIXAS ATIVAS</span>
+        <span id="syncState">SYNC // AGUARDANDO</span>
+      </div>
+    </section>
+
+    <section class="now-section">
+      <div class="section-heading">
+        <div><span class="eyebrow">MIXER // AO VIVO</span><h2>AGORA TOCANDO</h2></div>
+        <button id="addTrackQuick" class="primary-small gm-only" type="button">+ FAIXA</button>
+      </div>
+      <div id="nowPlaying" class="now-playing"></div>
+      <div id="emptyMix" class="empty-state">
+        <span class="empty-mark">◇</span>
+        <strong>NENHUMA FAIXA ATIVA</strong>
+        <small>Inicie uma trilha da biblioteca para criar sua mixagem.</small>
+      </div>
+    </section>
+
+    <section class="library-section gm-only">
+      <div class="section-heading compact">
+        <div><span class="eyebrow">ARQUIVO // LOCAL</span><h2>BIBLIOTECA</h2></div>
+        <span id="libraryCount" class="library-count">00</span>
+      </div>
+      <label class="search-box">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+        <input id="searchInput" type="search" placeholder="Buscar faixa ou tag…" />
+      </label>
+      <div id="tagFilters" class="tag-filters"></div>
+      <div id="libraryList" class="library-list"></div>
+    </section>
+
+    <section id="playerNotice" class="player-notice hidden">
+      <span>CONTROLE REMOTO</span>
+      <strong>O áudio desta sala é controlado pelo Mestre.</strong>
+      <small>Você pode fechar este painel. O motor de áudio continua ativo em segundo plano.</small>
+    </section>
+
+    <div id="menu" class="floating-menu hidden">
+      <button id="addTrackButton" type="button"><span>＋</span>Adicionar faixa</button>
+      <button id="importButton" type="button"><span>⇧</span>Importar CSV</button>
+      <button id="exportButton" type="button"><span>⇩</span>Exportar CSV</button>
+      <div class="menu-separator"></div>
+      <button id="clearLibraryButton" class="danger" type="button"><span>×</span>Limpar biblioteca</button>
+    </div>
+
+    <dialog id="trackDialog" class="track-dialog">
+      <form method="dialog" id="trackForm">
+        <header>
+          <div><span class="eyebrow">ARQUIVO // TRILHA</span><h2 id="trackDialogTitle">ADICIONAR FAIXA</h2></div>
+          <button value="cancel" class="icon-button" type="button" id="closeDialog">×</button>
+        </header>
+        <input id="trackId" type="hidden" />
+        <label><span>TÍTULO</span><input id="trackTitle" type="text" required maxlength="100" placeholder="Ex.: Hospital Kali" /></label>
+        <label><span>URL DE ÁUDIO / DROPBOX</span><input id="trackUrl" type="url" required placeholder="https://www.dropbox.com/…" /></label>
+        <label><span>TAGS</span><input id="trackTags" type="text" placeholder="Ambiente, Terror, Combate" /></label>
+        <div class="form-grid">
+          <label><span>VOLUME INICIAL</span><input id="trackVolume" type="number" min="0" max="100" value="70" /></label>
+          <label class="toggle-label"><span>LOOP PADRÃO</span><input id="trackLoop" type="checkbox" checked /><i></i></label>
+        </div>
+        <p class="form-hint">Links de compartilhamento do Dropbox são convertidos automaticamente para reprodução direta.</p>
+        <footer><button id="cancelDialog" type="button" class="secondary">CANCELAR</button><button type="submit" class="primary">SALVAR</button></footer>
+      </form>
+    </dialog>
+
+    <input id="csvInput" class="hidden" type="file" accept=".csv,text/csv" />
+    <div id="toast" class="toast hidden"></div>
+    <div id="loading" class="loading"><span></span>Conectando ao motor de áudio…</div>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

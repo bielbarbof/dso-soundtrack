@@ -1,0 +1,4 @@
+/*
+  Access-Control-Allow-Origin: https://www.owlbear.rodeo
+  Access-Control-Allow-Methods: GET, OPTIONS
+  Cross-Origin-Resource-Policy: cross-origin

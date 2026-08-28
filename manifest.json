@@ -1,0 +1,22 @@
+{
+  "name": "DSO Soundtrack",
+  "version": "0.1.0",
+  "manifest_version": 1,
+  "description": "Mixer de trilhas Tech Noir para Owlbear Rodeo com áudio em camadas e volume global do mestre.",
+  "author": "DSO",
+  "icon": "/icon.svg",
+  "action": {
+    "title": "DSO Soundtrack",
+    "icon": "/icon.svg",
+    "popover": "/",
+    "height": 800,
+    "width": 430
+  },
+  "background_url": "/background.html",
+  "permissions": [
+    {
+      "name": "autoplay",
+      "reason": "Reproduzir e sincronizar trilhas de áudio da mesa mesmo com o painel fechado."
+    }
+  ]
+}
