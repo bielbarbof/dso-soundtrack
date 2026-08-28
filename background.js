@@ -4,6 +4,10 @@ const CONTROL_CHANNEL = "com.dso.soundtrack/control";
 const STATE_CHANNEL = "com.dso.soundtrack/state";
 const ENGINE_CHANNEL = "com.dso.soundtrack/engine";
 
+const SYNC_INTERVAL_MS = 2000;
+const HARD_DRIFT_SECONDS = 0.32;
+const SOFT_DRIFT_SECONDS = 0.08;
+
 const state = {
   roomId: "preview-room",
   role: "PLAYER",
@@ -11,6 +15,7 @@ const state = {
   tracks: {},
   audio: new Map(),
   ready: false,
+  syncTimer: null,
 };
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
@@ -20,42 +25,13 @@ function storageKey() {
   return `dso.soundtrack.engine.${state.roomId}`;
 }
 
-function serializableState() {
-  const stamp = now();
-  return {
-    master: state.master,
-    tracks: Object.values(state.tracks).map((track) => ({
-      ...track,
-      position: getPosition(track),
-      startedAt: track.status === "playing" ? stamp : null,
-    })),
-    updatedAt: stamp,
-  };
-}
-
-function persist() {
-  try { localStorage.setItem(storageKey(), JSON.stringify(serializableState())); } catch {}
-}
-
-function loadPersisted() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(storageKey()) || "null");
-    if (!saved) return;
-    if (Number.isFinite(saved.master)) state.master = clamp(saved.master, 0, 1);
-    if (Array.isArray(saved.tracks)) {
-      state.tracks = Object.fromEntries(saved.tracks.filter(t => t?.id && t?.url).map(t => [t.id, t]));
-    }
-  } catch {}
-}
-
 function normalizeDropboxUrl(input) {
   try {
     const url = new URL(input);
-    if (/dropbox\.com$/i.test(url.hostname) || /www\.dropbox\.com$/i.test(url.hostname)) {
+    if (/^(www\.)?dropbox\.com$/i.test(url.hostname)) {
       url.hostname = "dl.dropboxusercontent.com";
       url.searchParams.delete("dl");
       url.searchParams.delete("raw");
-      return url.toString();
     }
     return url.toString();
   } catch {
@@ -64,44 +40,142 @@ function normalizeDropboxUrl(input) {
 }
 
 function getPosition(track) {
-  if (track.status === "playing" && Number.isFinite(track.startedAt)) {
-    const elapsed = Math.max(0, (now() - track.startedAt) / 1000);
-    if (track.loop && track.duration > 0) return elapsed % track.duration;
-    return Math.max(0, track.position + elapsed);
-  }
-  return Math.max(0, Number(track.position) || 0);
+  const base = Math.max(0, Number(track.position) || 0);
+  if (track.status !== "playing" || !Number.isFinite(track.startedAt)) return base;
+
+  const elapsed = Math.max(0, (now() - track.startedAt) / 1000);
+  const raw = base + elapsed;
+  if (track.loop && Number(track.duration) > 0) return raw % Number(track.duration);
+  return raw;
+}
+
+function snapshot() {
+  const sentAt = now();
+  return {
+    master: state.master,
+    tracks: Object.values(state.tracks).map((track) => ({
+      ...track,
+      position: getPosition(track),
+      startedAt: null,
+    })),
+    sentAt,
+    updatedAt: sentAt,
+  };
+}
+
+function persist() {
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify(snapshot()));
+  } catch {}
+}
+
+function loadPersisted() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey()) || "null");
+    if (!saved) return;
+    if (Number.isFinite(saved.master)) state.master = clamp(saved.master, 0, 1);
+    if (Array.isArray(saved.tracks)) {
+      const stamp = now();
+      state.tracks = Object.fromEntries(
+        saved.tracks
+          .filter((t) => t?.id && t?.url)
+          .map((t) => [t.id, {
+            ...t,
+            position: Math.max(0, Number(t.position) || 0),
+            startedAt: t.status === "playing" ? stamp : null,
+          }])
+      );
+    }
+  } catch {}
+}
+
+async function notifyLocal(data) {
+  if (!OBR.isAvailable) return;
+  try {
+    await OBR.broadcast.sendMessage(ENGINE_CHANNEL, data, { destination: "LOCAL" });
+  } catch {}
+}
+
+async function broadcastSnapshot(destination = "ALL") {
+  if (!OBR.isAvailable) return;
+  await OBR.broadcast.sendMessage(
+    STATE_CHANNEL,
+    { type: "snapshot", state: snapshot() },
+    { destination }
+  );
+}
+
+async function broadcastPatch(patch, destination = "ALL") {
+  if (!OBR.isAvailable) return;
+  await OBR.broadcast.sendMessage(
+    STATE_CHANNEL,
+    { type: "patch", patch, sentAt: now() },
+    { destination }
+  );
+}
+
+function effectiveVolume(track) {
+  return clamp(state.master * clamp(Number(track.volume ?? 0.7), 0, 1), 0, 1);
 }
 
 function createAudio(track) {
   const audio = new Audio();
+  const source = normalizeDropboxUrl(track.url);
+
   audio.preload = "auto";
-  audio.src = normalizeDropboxUrl(track.url);
+  audio.src = source;
+  audio.__dsoSource = source;
   audio.loop = !!track.loop;
-  audio.volume = clamp(state.master * clamp(track.volume ?? 0.7, 0, 1), 0, 1);
+  audio.volume = effectiveVolume(track);
+  audio.playbackRate = 1;
+
   audio.addEventListener("loadedmetadata", async () => {
     if (!Number.isFinite(audio.duration)) return;
     const current = state.tracks[track.id];
     if (!current) return;
+
+    if (Number.isFinite(audio.__dsoPendingPosition)) {
+      try { audio.currentTime = Math.max(0, audio.__dsoPendingPosition); } catch {}
+      audio.__dsoPendingPosition = null;
+    }
+
     current.duration = audio.duration;
     persist();
+
+    // Duration is metadata only: no player rebuild or seek.
     if (state.role === "GM" && OBR.isAvailable) {
-      await OBR.broadcast.sendMessage(STATE_CHANNEL, { type: "state", state: serializableState() }, { destination: "ALL" });
+      await broadcastPatch({
+        kind: "duration",
+        trackId: track.id,
+        duration: audio.duration,
+      }, "ALL");
     }
   });
+
   audio.addEventListener("ended", async () => {
     const current = state.tracks[track.id];
     if (!current || current.loop) return;
-    current.status = "stopped";
-    current.position = 0;
-    current.startedAt = null;
+
+    delete state.tracks[track.id];
+    audio.pause();
+    state.audio.delete(track.id);
     persist();
+
     if (state.role === "GM" && OBR.isAvailable) {
-      await OBR.broadcast.sendMessage(STATE_CHANNEL, { type: "state", state: serializableState() }, { destination: "ALL" });
+      await broadcastSnapshot("ALL");
+      await notifyLocal({ type: "state", state: snapshot(), role: state.role });
     }
   });
+
   audio.addEventListener("error", () => {
-    notifyLocal({ type: "audio-error", trackId: track.id, title: track.title, code: audio.error?.code || 0 });
+    notifyLocal({
+      type: "audio-error",
+      trackId: track.id,
+      title: track.title,
+      code: audio.error?.code || 0,
+    });
   });
+
   state.audio.set(track.id, audio);
   return audio;
 }
@@ -109,74 +183,230 @@ function createAudio(track) {
 function ensureAudio(track) {
   let audio = state.audio.get(track.id);
   const desiredUrl = normalizeDropboxUrl(track.url);
-  if (!audio || audio.src !== desiredUrl) {
-    if (audio) { audio.pause(); state.audio.delete(track.id); }
+
+  // Compare against our own source marker instead of HTMLAudioElement.src.
+  // Browsers canonicalize `audio.src`, which previously caused false URL changes
+  // and recreated the player when unrelated controls were moved.
+  if (!audio || audio.__dsoSource !== desiredUrl) {
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute("src");
+      state.audio.delete(track.id);
+    }
     audio = createAudio(track);
   }
   return audio;
 }
 
-async function applyTrack(track) {
-  const audio = ensureAudio(track);
+function setAudioVolume(trackId) {
+  const track = state.tracks[trackId];
+  const audio = state.audio.get(trackId);
+  if (!track || !audio) return;
+  audio.volume = effectiveVolume(track);
+}
+
+function setAllAudioVolumes() {
+  for (const track of Object.values(state.tracks)) setAudioVolume(track.id);
+}
+
+function setAudioLoop(trackId) {
+  const track = state.tracks[trackId];
+  const audio = state.audio.get(trackId);
+  if (!track || !audio) return;
   audio.loop = !!track.loop;
-  audio.volume = clamp(state.master * clamp(track.volume ?? 0.7, 0, 1), 0, 1);
-  const desired = getPosition(track);
-  if (Number.isFinite(desired) && Math.abs((audio.currentTime || 0) - desired) > 1.25) {
-    try { audio.currentTime = desired; } catch {}
+}
+
+function gentlyCorrectDrift(audio, desired) {
+  if (!Number.isFinite(desired) || !Number.isFinite(audio.currentTime)) return;
+  const drift = desired - audio.currentTime;
+  const abs = Math.abs(drift);
+
+  if (abs > HARD_DRIFT_SECONDS) {
+    try { audio.currentTime = Math.max(0, desired); } catch {}
+    audio.playbackRate = 1;
+    return;
   }
-  if (track.status === "playing") {
-    try {
-      await audio.play();
-      notifyLocal({ type: "audio-ready", trackId: track.id });
-    } catch (error) {
-      notifyLocal({ type: "audio-blocked", trackId: track.id, message: String(error?.message || error) });
-    }
+
+  if (abs > SOFT_DRIFT_SECONDS && !audio.paused) {
+    audio.playbackRate = drift > 0 ? 1.035 : 0.965;
+    clearTimeout(audio.__dsoRateTimer);
+    audio.__dsoRateTimer = setTimeout(() => {
+      if (state.audio.get(audio.__dsoTrackId) === audio) audio.playbackRate = 1;
+    }, 850);
   } else {
-    audio.pause();
+    audio.playbackRate = 1;
   }
 }
 
-async function applyAll() {
+async function applyTrackPlayback(track, { forcePosition = false } = {}) {
+  const audio = ensureAudio(track);
+  audio.__dsoTrackId = track.id;
+  audio.loop = !!track.loop;
+  audio.volume = effectiveVolume(track);
+
+  const desired = getPosition(track);
+  if (forcePosition) {
+    try {
+      audio.currentTime = Math.max(0, desired);
+      audio.__dsoPendingPosition = null;
+    } catch {
+      audio.__dsoPendingPosition = Math.max(0, desired);
+    }
+  } else {
+    gentlyCorrectDrift(audio, desired);
+  }
+
+  if (track.status === "playing") {
+    if (audio.paused) {
+      try {
+        await audio.play();
+        notifyLocal({ type: "audio-ready", trackId: track.id });
+      } catch (error) {
+        notifyLocal({
+          type: "audio-blocked",
+          trackId: track.id,
+          message: String(error?.message || error),
+        });
+      }
+    }
+  } else {
+    audio.pause();
+    audio.playbackRate = 1;
+  }
+}
+
+async function reconcilePlayback({ forceNew = false } = {}) {
   const alive = new Set(Object.keys(state.tracks));
-  for (const [id, audio] of state.audio.entries()) {
+
+  for (const [id, audio] of [...state.audio.entries()]) {
     if (!alive.has(id)) {
       audio.pause();
       audio.removeAttribute("src");
       state.audio.delete(id);
     }
   }
-  for (const track of Object.values(state.tracks)) await applyTrack(track);
+
+  for (const track of Object.values(state.tracks)) {
+    const isNew = !state.audio.has(track.id);
+    await applyTrackPlayback(track, { forcePosition: forceNew && isNew });
+  }
 }
 
-async function notifyLocal(data) {
-  if (!OBR.isAvailable) return;
-  try { await OBR.broadcast.sendMessage(ENGINE_CHANNEL, data, { destination: "LOCAL" }); } catch {}
+async function hydrateRemoteSnapshot(incoming) {
+  if (!incoming || typeof incoming !== "object") return;
+  if (Number.isFinite(incoming.master)) state.master = clamp(incoming.master, 0, 1);
+
+  const previous = state.tracks;
+  if (Array.isArray(incoming.tracks)) {
+    const receivedAt = now();
+    state.tracks = Object.fromEntries(
+      incoming.tracks
+        .filter((t) => t?.id && t?.url)
+        .map((t) => [t.id, {
+          ...t,
+          position: Math.max(0, Number(t.position) || 0),
+          startedAt: t.status === "playing" ? receivedAt : null,
+        }])
+    );
+  }
+
+  const alive = new Set(Object.keys(state.tracks));
+  for (const [id, audio] of [...state.audio.entries()]) {
+    if (!alive.has(id)) {
+      audio.pause();
+      audio.removeAttribute("src");
+      state.audio.delete(id);
+    }
+  }
+
+  for (const track of Object.values(state.tracks)) {
+    const prior = previous[track.id];
+    const mustLockPosition = !prior || prior.status !== track.status;
+    await applyTrackPlayback(track, { forcePosition: mustLockPosition });
+  }
+
+  persist();
+  notifyLocal({ type: "state", state: snapshot(), role: state.role });
 }
 
-async function broadcastState(destination = "ALL") {
-  if (!OBR.isAvailable) return;
-  await OBR.broadcast.sendMessage(STATE_CHANNEL, { type: "state", state: serializableState() }, { destination });
+function applyRemotePatch(patch) {
+  if (!patch || typeof patch !== "object") return;
+
+  if (patch.kind === "master") {
+    state.master = clamp(Number(patch.value) || 0, 0, 1);
+    setAllAudioVolumes();
+  } else if (patch.kind === "track-volume") {
+    const track = state.tracks[patch.trackId];
+    if (!track) return;
+    track.volume = clamp(Number(patch.value) || 0, 0, 1);
+    setAudioVolume(track.id);
+  } else if (patch.kind === "track-loop") {
+    const track = state.tracks[patch.trackId];
+    if (!track) return;
+    track.loop = !!patch.value;
+    setAudioLoop(track.id);
+  } else if (patch.kind === "duration") {
+    const track = state.tracks[patch.trackId];
+    if (!track) return;
+    track.duration = Math.max(0, Number(patch.duration) || 0);
+  } else {
+    return;
+  }
+
+  persist();
+  notifyLocal({ type: "patch", patch, role: state.role });
 }
 
 async function handleControl(data) {
   if (!data || typeof data !== "object") return;
+
   if (data.type === "request-state") {
-    if (state.role === "GM") await broadcastState("ALL");
+    if (state.role === "GM") await broadcastSnapshot("ALL");
     return;
   }
+
   if (data.type === "ui-state-request") {
-    await notifyLocal({ type: "state", state: serializableState(), role: state.role });
+    await notifyLocal({ type: "state", state: snapshot(), role: state.role });
     return;
   }
+
   if (state.role !== "GM") return;
 
+  // Mixer-only controls are patches. They NEVER rebuild, seek or replay audio.
   if (data.type === "set-master") {
     state.master = clamp(Number(data.value) || 0, 0, 1);
-  } else if (data.type === "play-track") {
+    setAllAudioVolumes();
+    persist();
+    await broadcastPatch({ kind: "master", value: state.master }, "ALL");
+    return;
+  }
+
+  if (data.type === "set-track-volume") {
+    const track = state.tracks[data.trackId];
+    if (!track) return;
+    track.volume = clamp(Number(data.value) || 0, 0, 1);
+    setAudioVolume(track.id);
+    persist();
+    await broadcastPatch({ kind: "track-volume", trackId: track.id, value: track.volume }, "ALL");
+    return;
+  }
+
+  if (data.type === "set-track-loop") {
+    const track = state.tracks[data.trackId];
+    if (!track) return;
+    track.loop = !!data.value;
+    setAudioLoop(track.id);
+    persist();
+    await broadcastPatch({ kind: "track-loop", trackId: track.id, value: track.loop }, "ALL");
+    return;
+  }
+
+  if (data.type === "play-track") {
     const incoming = data.track;
     if (!incoming?.id || !incoming?.url) return;
+
     const existing = state.tracks[incoming.id] || {};
-    const position = Number(data.position ?? existing.position ?? 0) || 0;
+    const position = Math.max(0, Number(data.position ?? 0) || 0);
     state.tracks[incoming.id] = {
       ...existing,
       ...incoming,
@@ -185,66 +415,97 @@ async function handleControl(data) {
       status: "playing",
       position,
       startedAt: now(),
-      duration: Number(existing.duration || incoming.duration || 0) || 0,
+      duration: Math.max(0, Number(existing.duration || incoming.duration || 0) || 0),
     };
+
+    const audio = ensureAudio(state.tracks[incoming.id]);
+    try {
+      audio.currentTime = position;
+      audio.__dsoPendingPosition = null;
+    } catch {
+      audio.__dsoPendingPosition = position;
+    }
+    await applyTrackPlayback(state.tracks[incoming.id], { forcePosition: true });
   } else if (data.type === "pause-track") {
     const track = state.tracks[data.trackId];
     if (!track) return;
     track.position = getPosition(track);
     track.status = "paused";
     track.startedAt = null;
+    const audio = state.audio.get(track.id);
+    if (audio) {
+      audio.pause();
+      audio.playbackRate = 1;
+    }
   } else if (data.type === "resume-track") {
     const track = state.tracks[data.trackId];
     if (!track) return;
     track.status = "playing";
     track.startedAt = now();
+    await applyTrackPlayback(track, { forcePosition: false });
   } else if (data.type === "stop-track") {
     const track = state.tracks[data.trackId];
     if (!track) return;
     delete state.tracks[data.trackId];
+    const audio = state.audio.get(data.trackId);
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute("src");
+      state.audio.delete(data.trackId);
+    }
   } else if (data.type === "stop-all") {
     state.tracks = {};
-  } else if (data.type === "set-track-volume") {
-    const track = state.tracks[data.trackId];
-    if (!track) return;
-    track.volume = clamp(Number(data.value) || 0, 0, 1);
-  } else if (data.type === "set-track-loop") {
-    const track = state.tracks[data.trackId];
-    if (!track) return;
-    track.loop = !!data.value;
+    for (const audio of state.audio.values()) {
+      audio.pause();
+      audio.removeAttribute("src");
+    }
+    state.audio.clear();
   } else if (data.type === "seek-track") {
     const track = state.tracks[data.trackId];
     if (!track) return;
     track.position = Math.max(0, Number(data.position) || 0);
     track.startedAt = track.status === "playing" ? now() : null;
+    const audio = ensureAudio(track);
+    try {
+      audio.currentTime = track.position;
+      audio.__dsoPendingPosition = null;
+    } catch {
+      audio.__dsoPendingPosition = track.position;
+    }
   } else if (data.type === "update-track") {
-    const track = state.tracks[data.track?.id];
+    const incoming = data.track;
+    const track = state.tracks[incoming?.id];
     if (!track) return;
+
     const position = getPosition(track);
-    Object.assign(track, data.track, { position, startedAt: track.status === "playing" ? now() : null });
+    const previousUrl = normalizeDropboxUrl(track.url);
+    const nextUrl = normalizeDropboxUrl(incoming.url ?? track.url);
+
+    Object.assign(track, incoming, {
+      position,
+      startedAt: track.status === "playing" ? now() : null,
+    });
+
+    if (previousUrl !== nextUrl) {
+      const oldAudio = state.audio.get(track.id);
+      if (oldAudio) {
+        oldAudio.pause();
+        oldAudio.removeAttribute("src");
+        state.audio.delete(track.id);
+      }
+      await applyTrackPlayback(track, { forcePosition: true });
+    } else {
+      setAudioVolume(track.id);
+      setAudioLoop(track.id);
+    }
   } else {
     return;
   }
 
   persist();
-  await applyAll();
-  await broadcastState("ALL");
-  await notifyLocal({ type: "state", state: serializableState(), role: state.role });
-}
-
-function hydrateRemote(incoming) {
-  if (!incoming || typeof incoming !== "object") return;
-  if (Number.isFinite(incoming.master)) state.master = clamp(incoming.master, 0, 1);
-  if (Array.isArray(incoming.tracks)) {
-    const localStamp = now();
-    state.tracks = Object.fromEntries(incoming.tracks.filter(t => t?.id && t?.url).map(t => [t.id, {
-      ...t,
-      startedAt: t.status === "playing" ? localStamp : null,
-    }]));
-  }
-  persist();
-  applyAll();
-  notifyLocal({ type: "state", state: serializableState(), role: state.role });
+  await reconcilePlayback();
+  await broadcastSnapshot("ALL");
+  await notifyLocal({ type: "state", state: snapshot(), role: state.role });
 }
 
 async function init() {
@@ -253,26 +514,35 @@ async function init() {
     state.ready = true;
     return;
   }
+
   OBR.onReady(async () => {
     state.roomId = OBR.room.id || "room";
     state.role = await OBR.player.getRole();
     loadPersisted();
-    await applyAll();
+    await reconcilePlayback({ forceNew: true });
 
     OBR.broadcast.onMessage(CONTROL_CHANNEL, (event) => handleControl(event.data));
     OBR.broadcast.onMessage(STATE_CHANNEL, (event) => {
       const data = event.data;
-      if (data?.type !== "state") return;
-      if (state.role === "GM") return;
-      hydrateRemote(data.state);
+      if (!data || state.role === "GM") return;
+      if (data.type === "snapshot") hydrateRemoteSnapshot(data.state);
+      if (data.type === "patch") applyRemotePatch(data.patch);
     });
 
     state.ready = true;
-    await notifyLocal({ type: "state", state: serializableState(), role: state.role });
+    await notifyLocal({ type: "state", state: snapshot(), role: state.role });
+
     if (state.role !== "GM") {
-      await OBR.broadcast.sendMessage(CONTROL_CHANNEL, { type: "request-state" }, { destination: "REMOTE" });
+      await OBR.broadcast.sendMessage(
+        CONTROL_CHANNEL,
+        { type: "request-state" },
+        { destination: "REMOTE" }
+      );
     } else {
-      await broadcastState("REMOTE");
+      await broadcastSnapshot("REMOTE");
+      state.syncTimer = setInterval(() => {
+        broadcastSnapshot("REMOTE").catch(() => {});
+      }, SYNC_INTERVAL_MS);
     }
   });
 }

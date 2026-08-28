@@ -26,8 +26,8 @@ button { color:inherit; }
 .app-header { height:68px; padding:0 14px 0 16px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line-soft); background:#0a0b0f; position:sticky; top:0; z-index:12; }
 .brand { display:flex; gap:11px; align-items:center; min-width:0; }
 .brand-icon { width:34px; height:34px; display:grid; place-items:center; background:#101219; border:1px solid #2a2e38; border-radius:8px; }
-.brand-icon svg { width:26px; height:26px; fill:none; stroke:#dfe2e7; stroke-width:1.7; }
-.brand-icon .pulse { stroke:var(--red); stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; }
+.brand-icon svg { width:25px; height:25px; fill:none; stroke:#dfe2e7; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; }
+.brand-icon .pulse { stroke:var(--red); stroke-width:2; }
 .brand strong { display:block; font-size:16px; letter-spacing:.055em; line-height:1.1; }
 .brand small { display:block; margin-top:4px; color:var(--muted); font-size:10px; letter-spacing:.04em; }
 .icon-button { border:1px solid var(--line); background:#101219; border-radius:7px; height:36px; min-width:36px; display:grid; place-items:center; cursor:pointer; }
@@ -45,7 +45,8 @@ button { color:inherit; }
 .range::-moz-range-thumb { width:12px; height:12px; border-radius:50%; background:#e7e9ed; border:2px solid #0b0c10; }
 .range-master { background:linear-gradient(90deg,var(--red) 0 70%,#303540 70%); }
 .master-meta { display:flex; justify-content:space-between; margin-top:9px; color:var(--faint); font-size:8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:.1em; }
-.now-section, .library-section { padding:16px; }
+.now-section { padding:16px; }
+.library-section { padding:10px 16px 16px; }
 .now-section { border-bottom:1px solid var(--line-soft); }
 .section-heading { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:12px; }
 .section-heading.compact { margin-bottom:10px; }
@@ -141,3 +142,29 @@ h2 { margin:3px 0 0; font-size:15px; line-height:1; letter-spacing:.035em; }
   .brand strong { font-size:14px; }
   .track-title strong { font-size:12px; }
 }
+
+/* v0.1.1 — mixer refinement */
+.mix-toolbar { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.now-section { padding-top:10px; }
+.mix-card.is-playing {
+  border-color:#2d2a30;
+  background:linear-gradient(145deg,#1a0f13 0%,#120d11 56%,#101117 100%);
+  box-shadow:0 8px 24px rgba(0,0,0,.18), inset 0 0 32px rgba(94,20,29,.08);
+}
+.mix-card.is-playing .track-title strong { color:#f2f3f6; }
+.mix-card.is-playing .track-title small { color:#b28d92; }
+.track-title small { font-size:10px; }
+
+/* Make mixer sliders feel continuous while dragging. */
+.track-volume,
+.track-seek,
+.range-master { touch-action:none; }
+.track-volume { height:4px; }
+.track-volume::-webkit-slider-thumb { width:15px; height:15px; }
+.track-volume::-moz-range-thumb { width:13px; height:13px; }
+
+/* Categories and library tags are now meant to be read at a glance. */
+.tag-filters { gap:7px; margin-bottom:12px; }
+.tag-filter { height:30px; padding:0 11px; font-size:10px; font-weight:650; }
+.library-tags { gap:5px; margin-top:7px; }
+.library-tags span { padding:3px 8px; font-size:9px; line-height:1.15; }

@@ -84,7 +84,8 @@ async function sendControl(data) {
 }
 
 function previewHandle(data) {
-  if (data.type === "set-master") state.master=data.value;
+  let shouldRender=true;
+  if (data.type === "set-master") { state.master=data.value; shouldRender=false; }
   if (data.type === "play-track") {
     const old=playingTrack(data.track.id); const track={...old,...data.track,status:"playing",position:data.position||0,startedAt:Date.now(),duration:old?.duration||0};
     state.tracks=state.tracks.filter(t=>t.id!==track.id).concat(track);
@@ -93,11 +94,11 @@ function previewHandle(data) {
   if (data.type === "resume-track") { const t=playingTrack(data.trackId); if(t){t.status="playing";t.startedAt=Date.now();} }
   if (data.type === "stop-track") state.tracks=state.tracks.filter(t=>t.id!==data.trackId);
   if (data.type === "stop-all") state.tracks=[];
-  if (data.type === "set-track-volume") { const t=playingTrack(data.trackId); if(t)t.volume=data.value; }
-  if (data.type === "set-track-loop") { const t=playingTrack(data.trackId); if(t)t.loop=data.value; }
+  if (data.type === "set-track-volume") { const t=playingTrack(data.trackId); if(t)t.volume=data.value; shouldRender=false; }
+  if (data.type === "set-track-loop") { const t=playingTrack(data.trackId); if(t)t.loop=data.value; shouldRender=false; }
   if (data.type === "seek-track") { const t=playingTrack(data.trackId); if(t){t.position=data.position;t.startedAt=t.status==="playing"?Date.now():null;} }
   if (data.type === "update-track") { const t=playingTrack(data.track?.id); if(t)Object.assign(t,data.track); }
-  renderAll();
+  if (shouldRender) renderAll();
 }
 
 function setEngineState(payload) {
@@ -109,6 +110,52 @@ function setEngineState(payload) {
   }
   state.engineReady=true;
   renderAll();
+}
+
+function applyEnginePatch(patch) {
+  if (!patch || typeof patch !== "object") return;
+
+  if (patch.kind === "master") {
+    state.master=clamp(Number(patch.value)||0,0,1);
+    const pct=Math.round(state.master*100);
+    if (!els.master.matches(":active")) els.master.value=pct;
+    els.masterValue.textContent=`${pct}%`;
+    updateRangeFill(els.master);
+    return;
+  }
+
+  const track=playingTrack(patch.trackId);
+  if (!track) return;
+  const card=els.now.querySelector(`[data-track-id="${CSS.escape(String(track.id))}"]`);
+
+  if (patch.kind === "track-volume") {
+    track.volume=clamp(Number(patch.value)||0,0,1);
+    if (card) {
+      const slider=card.querySelector(".track-volume");
+      const out=card.querySelector(".volume-wrap output");
+      const pct=Math.round(track.volume*100);
+      if (slider && !slider.matches(":active")) slider.value=pct;
+      if (slider) updateRangeFill(slider,"#d7d9de");
+      if (out) out.textContent=`${pct}%`;
+    }
+  } else if (patch.kind === "track-loop") {
+    track.loop=!!patch.value;
+    if (card) {
+      const btn=card.querySelector('[data-action="loop"]');
+      if (btn) {
+        btn.classList.toggle("active",track.loop);
+        btn.textContent=`LOOP ${track.loop?"ON":"OFF"}`;
+      }
+    }
+  } else if (patch.kind === "duration") {
+    track.duration=Math.max(0,Number(patch.duration)||0);
+    if (card) {
+      const times=card.querySelectorAll(".timeline time");
+      if (times[1]) times[1].textContent=track.duration?formatTime(track.duration):"--:--";
+      const seek=card.querySelector(".track-seek");
+      if (seek) seek.max=Math.max(track.duration,currentPosition(track),1);
+    }
+  }
 }
 
 function renderMaster() {
@@ -145,7 +192,7 @@ function renderNow() {
       </div>
       <div class="timeline"><time data-pos>${formatTime(pos)}</time><input class="range track-seek" type="range" min="0" max="${max}" step="0.1" value="${Math.min(pos,max)}" ${state.role!=="GM"?"disabled":""}/><time>${duration?formatTime(duration):"--:--"}</time></div>
       <div class="mix-controls"><div class="volume-wrap"><span>VOL</span><input class="range track-volume" type="range" min="0" max="100" value="${Math.round((track.volume??.7)*100)}" ${state.role!=="GM"?"disabled":""}/><output>${Math.round((track.volume??.7)*100)}%</output></div>
-      <button class="loop-button ${track.loop?"active":""} gm-only" data-action="loop">LOOP ${track.loop?"ON":"OFF"}</button></div>
+      <button class="loop-button ${track.loop?"active":""} gm-only" data-action="loop" title="Repetir esta faixa continuamente">LOOP ${track.loop?"ON":"OFF"}</button></div>
     </article>`;
   }).join("");
 
@@ -174,7 +221,7 @@ function renderTags() {
   els.tags.innerHTML=["TODAS",...tags].map(tag=>`<button class="tag-filter ${state.tag===tag.toUpperCase()?"active":""}" data-tag="${esc(tag.toUpperCase())}">${esc(tag)}</button>`).join("");
 }
 function renderLibrary() {
-  els.libraryCount.textContent=String(state.library.length).padStart(2,"0"); renderTags();
+  if(els.libraryCount) els.libraryCount.textContent=String(state.library.length).padStart(2,"0"); renderTags();
   const list=visibleLibrary();
   if(!list.length){ els.library.innerHTML='<div class="empty-state"><span class="empty-mark">◇</span><strong>NENHUMA FAIXA ENCONTRADA</strong><small>Adicione uma trilha ou altere os filtros.</small></div>'; return; }
   els.library.innerHTML=list.map(track=>{
@@ -237,8 +284,8 @@ async function init(){
   if(!OBR.isAvailable){ state.role="GM";state.roomId="preview-room";state.playerId="preview";state.engineReady=true;loadLibrary();renderAll();els.loading.classList.add("hidden");return; }
   OBR.onReady(async()=>{
     state.roomId=OBR.room.id||"room"; state.playerId=OBR.player.id||"player"; state.role=await OBR.player.getRole(); loadLibrary();
-    OBR.broadcast.onMessage(ENGINE_CHANNEL,event=>{const d=event.data;if(d?.type==="state")setEngineState(d.state);if(d?.type==="audio-blocked")showToast("O navegador bloqueou uma faixa. Interaja com o Owlbear e tente tocar novamente.",4200);if(d?.type==="audio-error")showToast(`Não foi possível carregar: ${d.title||"faixa"}. Verifique o link.`,4200);});
-    OBR.broadcast.onMessage(STATE_CHANNEL,event=>{if(event.data?.type==="state")setEngineState(event.data.state);});
+    OBR.broadcast.onMessage(ENGINE_CHANNEL,event=>{const d=event.data;if(d?.type==="state")setEngineState(d.state);if(d?.type==="patch")applyEnginePatch(d.patch);if(d?.type==="audio-blocked")showToast("O navegador bloqueou uma faixa. Interaja com o Owlbear e tente tocar novamente.",4200);if(d?.type==="audio-error")showToast(`Não foi possível carregar: ${d.title||"faixa"}. Verifique o link.`,4200);});
+    OBR.broadcast.onMessage(STATE_CHANNEL,event=>{const d=event.data;if(d?.type==="snapshot")setEngineState(d.state);if(d?.type==="patch")applyEnginePatch(d.patch);});
     await OBR.broadcast.sendMessage(CONTROL_CHANNEL,{type:"ui-state-request"},{destination:"LOCAL"});
     if(state.role!=="GM")await OBR.broadcast.sendMessage(CONTROL_CHANNEL,{type:"request-state"},{destination:"REMOTE"});
     renderAll();els.loading.classList.add("hidden");

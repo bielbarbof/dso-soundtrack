@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#090a0d" />
   <title>DSO Soundtrack</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -12,7 +13,10 @@
     <header class="app-header">
       <div class="brand">
         <div class="brand-icon" aria-hidden="true">
-          <svg viewBox="0 0 64 64"><path d="M32 8 50 18v28L32 56 14 46V18Z"/><path d="M14 18 32 29 50 18M32 29v27M14 46l18-17 18 17M32 8v21"/><path class="pulse" d="M18 35h6l3-7 5 15 4-11 3 7h7"/></svg>
+          <svg viewBox="0 0 32 32">
+            <path d="M3 16h3M8 11v10M12 7v18M16 12v8M20 9v14M24 13v6"/>
+            <path class="pulse" d="M28 8v12.5a3.5 3.5 0 1 1-2-3.16V10l-6 1.5"/>
+          </svg>
         </div>
         <div>
           <strong>DSO SOUNDTRACK</strong>
@@ -40,9 +44,8 @@
     </section>
 
     <section class="now-section">
-      <div class="section-heading">
-        <div><span class="eyebrow">MIXER // AO VIVO</span><h2>AGORA TOCANDO</h2></div>
-        <button id="addTrackQuick" class="primary-small gm-only" type="button">+ FAIXA</button>
+      <div class="mix-toolbar gm-only">
+        <button id="addTrackQuick" class="primary-small" type="button">+ FAIXA</button>
       </div>
       <div id="nowPlaying" class="now-playing"></div>
       <div id="emptyMix" class="empty-state">
@@ -53,10 +56,6 @@
     </section>
 
     <section class="library-section gm-only">
-      <div class="section-heading compact">
-        <div><span class="eyebrow">ARQUIVO // LOCAL</span><h2>BIBLIOTECA</h2></div>
-        <span id="libraryCount" class="library-count">00</span>
-      </div>
       <label class="search-box">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
         <input id="searchInput" type="search" placeholder="Buscar faixa ou tag…" />
